@@ -21,25 +21,18 @@ Artifacts land at:
 
 ## Pointing at a backend
 
-Production builds default to `https://game.luisbenedikt.de/play/movie-selector/api`
-(same origin as the web client, via the GamePage launcher proxy). For local
-testing against a backend on your host machine from the emulator:
-
-```
-./gradlew :android:assembleDebug -PapiBaseUrl=http://10.0.2.2:8080/api
-```
+The default (`https://game.luisbenedikt.de/play/movie-selector/api`) is production. The app
+forbids cleartext HTTP in every build, so `-PapiBaseUrl=` must be an `https://` URL.
 
 ## What's covered
 
-Provider/runtime filters, drag-to-swipe with a haptic tick on accept, button
+Portrait-locked. Provider/runtime filters, drag-to-swipe with a haptic tick on accept, button
 and keyboard-equivalent (D-pad/back) alternatives, undo, reject-all with
 reshuffle/bring-back-5, result screen, loading/error states, and Android back
 behavior (ends the session and returns to filters instead of exiting).
 
-## Known limitation
+## Verification
 
-This sandbox has no `/dev/kvm`-backed emulator available, so no on-device or
-emulator smoke launch was performed here -- only structural build success (both
-APK variants + AAB) and the `GameState` unit tests (`:android:testDebugUnitTest`,
-10 passing) were verified. Install an emulator image or connect a device and
-run `adb install android-debug.apk` to do a real launch before shipping.
+Unit tests: `./gradlew :android:testDebugUnitTest` (GameState, API contract via Ktor MockEngine,
+security/config guards). Acceptance was also run on an API 34 x86_64 emulator (1080x2340, 420dpi)
+against the production backend.

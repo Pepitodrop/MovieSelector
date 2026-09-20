@@ -1,3 +1,9 @@
 <resources>
-    <style name="Theme.MovieSelector" parent="android:Theme.Material.NoActionBar" />
+    <!-- Dark window + system bars matching the app background (no white flash, no light bars). -->
+    <style name="Theme.MovieSelector" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/app_background</item>
+        <item name="android:statusBarColor">@color/app_background</item>
+        <item name="android:navigationBarColor">@color/app_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
 </resources>

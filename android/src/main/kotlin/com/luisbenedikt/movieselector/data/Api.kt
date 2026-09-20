@@ -5,7 +5,6 @@ import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
@@ -57,10 +56,13 @@ interface MovieApi {
 }
 
 /** Talks only to our own backend (see [BuildConfig.API_BASE_URL]); never touches Wencke directly. */
-class MovieSelectorApi(private val baseUrl: String) : MovieApi {
-    private val client = HttpClient(CIO) {
+class MovieSelectorApi(
+    private val baseUrl: String,
+    engineClient: HttpClient = HttpClient(CIO),
+) : MovieApi {
+    private val client = engineClient.config {
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
-        install(HttpTimeout) { requestTimeoutMillis = 10_000 }
+        install(HttpTimeout) { requestTimeoutMillis = 15_000 }
     }
 
     override suspend fun startSession(providers: List<String>, runtime: String): ApiResult<SessionStateDto> =
@@ -78,6 +80,7 @@ class MovieSelectorApi(private val baseUrl: String) : MovieApi {
         val response = try {
             request()
         } catch (e: Exception) {
+            System.err.println("MovieSelectorApi: request failed: ${e::class.java.name}: ${e.message}")
             return ApiResult.Failure("Could not reach the server. Check your connection and try again.")
         }
         return if (response.status.isSuccess()) {

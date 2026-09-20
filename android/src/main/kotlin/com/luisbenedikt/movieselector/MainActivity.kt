@@ -15,7 +15,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -42,7 +45,7 @@ class MainActivity : ComponentActivity() {
         val api = MovieSelectorApi(BuildConfig.API_BASE_URL)
         setContent {
             val state = remember { GameState(api) }
-            MaterialTheme(colorScheme = darkColorScheme(background = Background, primary = Accent)) {
+            MaterialTheme(colorScheme = darkColorScheme(background = Background, primary = Accent, onPrimary = Background)) {
                 Surface(modifier = Modifier.fillMaxSize(), color = Background) {
                     MovieSelectorApp(state)
                 }
@@ -113,9 +116,10 @@ private fun SectionLabel(text: String) {
     Spacer(Modifier.height(6.dp))
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun <T> FlowChips(items: List<Pair<T, String>>, chip: @Composable (T, String) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items.forEach { (value, label) -> chip(value, label) }
     }
 }
@@ -130,6 +134,8 @@ private fun LoadingScreen() {
 }
 
 private const val SWIPE_THRESHOLD_DP = 120f
+private const val CARD_ASPECT = 0.68f
+private val CARD_CHROME_HEIGHT = 160.dp // "N left"/Undo row + spacers + the two 64dp buttons
 
 @Composable
 private fun CardScreen(state: GameState, scope: kotlinx.coroutines.CoroutineScope) {
@@ -143,6 +149,9 @@ private fun CardScreen(state: GameState, scope: kotlinx.coroutines.CoroutineScop
     val density = androidx.compose.ui.platform.LocalDensity.current
     val thresholdPx = with(density) { SWIPE_THRESHOLD_DP.dp.toPx() }
 
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    // Card width is bounded by height too, so the card + buttons always fit (landscape included).
+    val cardWidth = minOf(maxWidth, (maxHeight - CARD_CHROME_HEIGHT).coerceAtLeast(120.dp) * CARD_ASPECT)
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("${state.remaining} left", color = TextLight.copy(alpha = 0.7f))
@@ -151,19 +160,26 @@ private fun CardScreen(state: GameState, scope: kotlinx.coroutines.CoroutineScop
         Spacer(Modifier.height(12.dp))
         Box(
             Modifier
-                .fillMaxWidth()
-                .aspectRatio(0.68f)
+                .width(cardWidth)
+                .aspectRatio(CARD_ASPECT)
                 .offset { androidx.compose.ui.unit.IntOffset(offsetX.value.roundToInt(), 0) }
                 .rotate(offsetX.value / 40f)
-                .background(CardBg, RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(20.dp))
+                .background(CardBg)
                 .semantics { contentDescription = "${movie.title} movie card. Drag left to reject, right to select." }
                 .pointerInput(movie.id) {
+                    // Track the drag synchronously: reading the Animatable in onDragEnd races with the
+                    // async snapTo() launches, so a fast flick could be judged short and ignored.
+                    var dragX = 0f
                     detectDragGestures(
+                        onDragCancel = { dragX = 0f; scope.launch { offsetX.animateTo(0f) } },
                         onDragEnd = {
+                            val total = dragX
+                            dragX = 0f
                             scope.launch {
                                 when {
-                                    offsetX.value <= -thresholdPx -> { state.reject(scope); offsetX.snapTo(0f) }
-                                    offsetX.value >= thresholdPx -> {
+                                    total <= -thresholdPx -> { state.reject(scope); offsetX.snapTo(0f) }
+                                    total >= thresholdPx -> {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         state.accept(scope)
                                         offsetX.snapTo(0f)
@@ -174,7 +190,9 @@ private fun CardScreen(state: GameState, scope: kotlinx.coroutines.CoroutineScop
                         },
                     ) { change, dragAmount ->
                         change.consume()
-                        scope.launch { offsetX.snapTo(offsetX.value + dragAmount.x) }
+                        dragX += dragAmount.x
+                        val target = dragX
+                        scope.launch { offsetX.snapTo(target) }
                     }
                 },
         ) {
@@ -194,13 +212,22 @@ private fun CardScreen(state: GameState, scope: kotlinx.coroutines.CoroutineScop
             ) { Text("🍿", fontSize = 26.sp) }
         }
     }
+    }
 }
 
 @Composable
 private fun MovieCardContent(movie: MovieDto) {
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth().background(Color(0xFF1A2030)), contentAlignment = Alignment.Center) {
-            Text("🎬", fontSize = 64.sp)
+            Text("🎬", fontSize = 64.sp) // placeholder; the poster covers it once loaded
+            if (movie.posterUrl != null) {
+                AsyncImage(
+                    model = movie.posterUrl,
+                    contentDescription = "Poster for ${movie.title}",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text(movie.title, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TextLight)
@@ -234,16 +261,22 @@ private fun RejectAllScreen(onReshuffle: () -> Unit, onBringBack: () -> Unit) {
 
 @Composable
 private fun ResultScreen(movie: MovieDto?, onRestart: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("🍿 MOVIE TIME!", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TextLight)
-        Spacer(Modifier.height(20.dp))
-        if (movie != null) {
-            Box(Modifier.fillMaxWidth(0.8f).aspectRatio(0.68f).background(CardBg, RoundedCornerShape(20.dp))) {
-                MovieCardContent(movie)
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val cardWidth = minOf(maxWidth * 0.8f, (maxHeight - 170.dp).coerceAtLeast(120.dp) * CARD_ASPECT)
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("🍿 MOVIE TIME!", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TextLight)
+            Spacer(Modifier.height(20.dp))
+            if (movie != null) {
+                Box(Modifier.width(cardWidth).aspectRatio(CARD_ASPECT).clip(RoundedCornerShape(20.dp)).background(CardBg)) {
+                    MovieCardContent(movie)
+                }
             }
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onRestart, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Play again") }
         }
-        Spacer(Modifier.height(24.dp))
-        Button(onClick = onRestart, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Play again") }
     }
 }
 

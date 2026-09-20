@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTTPS only, in every build. Do not add per-domain entries: Ktor's CIO engine cannot do
+     hostname-aware trust checks, so any domain-config makes all TLS requests fail on Android. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
