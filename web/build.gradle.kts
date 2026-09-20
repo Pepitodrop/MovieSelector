@@ -8,7 +8,13 @@ kotlin {
             commonWebpackConfig {
                 outputFileName = "movieSelector.js"
             }
-            binaries.executable()
+            testTask { enabled = false } // browser tests need Chrome/Karma; the pure-logic tests run on Node
         }
+        nodejs()
+        binaries.executable()
     }
+}
+
+dependencies {
+    testImplementation(kotlin("test"))
 }
