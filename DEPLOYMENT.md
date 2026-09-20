@@ -8,8 +8,8 @@ live server.
 
 | Repo | Branch | SHA |
 |---|---|---|
-| `Pepitodrop/MovieSelector` | `feat/piet-core` | `0d63f5a41881e3add9eaea87088eaf969b7219d6` |
-| `Pepitodrop/GamePage` | `feat/movie-selector-integration` | `b516360c87900f6853b7e86acdadf56a837d0dce` |
+| `Pepitodrop/MovieSelector` | `feat/piet-core` | this checkout's `git rev-parse HEAD` (this file is versioned in the same repo, so any hardcoded SHA here goes stale the moment a new commit lands) |
+| `Pepitodrop/GamePage` | `feat/movie-selector-integration` | `6f0a0017cb29ea95c6450d1710d0d21ba311c5c1` |
 
 Both are pull requests, not yet merged to `main`. Merge them yourself (or ask me to, in a
 follow-up) once you're satisfied, then substitute `main`'s SHA after merge for the commands
@@ -28,6 +28,11 @@ Selector's backend logs into Wencke's existing `/api/v1/site-access/unlock` the 
 browser would, using a password you configure) -- nothing in `Pepitodrop/Wencke` was touched.
 This section is verification only: confirm Wencke is on the SHA you expect and its public API is
 healthy before pointing Movie Selector at it.
+
+**Read-only guarantee:** after login, Movie Selector only ever issues `GET
+/api/v1/movie-watchlist`. It never marks/unmarks watched, adds/deletes a movie, edits metadata,
+or writes anything into Wencke's database -- see [README.md](README.md#wencke-integration-is-read-only).
+No database backup or migration is required on Wencke's side for this deploy.
 
 ```bash
 # --- record current state ---
@@ -98,9 +103,9 @@ fi
 
 # --- check out the exact reviewed SHAs ---
 git -C ../MovieSelector fetch origin
-git -C ../MovieSelector checkout 0d63f5a41881e3add9eaea87088eaf969b7219d6   # or main, after you merge the PR
+git -C ../MovieSelector checkout feat/piet-core   # or main, after you merge the PR; pin to a SHA yourself if you want an exact commit
 git fetch origin
-git checkout b516360c87900f6853b7e86acdadf56a837d0dce                       # or main, after you merge the PR
+git checkout 6f0a0017cb29ea95c6450d1710d0d21ba311c5c1                      # or main, after you merge the PR
 
 # --- update .env ---
 # Add/confirm these lines in /srv/games/GamePage/.env (see the updated .env.example

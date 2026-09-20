@@ -105,4 +105,47 @@ class WenckeClientTest {
         val client = WenckeClient(HttpClient(engine), BASE_URL, "correct-password")
         assertFailsWith<WenckeUnavailableException> { client.fetchMovieWatchlist() }
     }
+
+    // --- Read-only contract -------------------------------------------------------------------
+    // Wencke is the source of truth; Movie Selector must never mutate it. These tests fail loudly
+    // if a future change adds a write path against Wencke's watchlist.
+
+    @Test fun `a full fetch, including the re-auth retry path, never sends a write method to Wencke`() = runBlocking {
+        val seenRequests = mutableListOf<Pair<String, String>>() // method to path
+        val engine = MockEngine { request ->
+            seenRequests += request.method.value to request.url.encodedPath
+            when (request.url.encodedPath) {
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                "/api/v1/movie-watchlist" -> respond("[]", HttpStatusCode.OK)
+                else -> respond("not found", HttpStatusCode.NotFound)
+            }
+        }
+        val client = WenckeClient(HttpClient(engine), BASE_URL, "correct-password")
+        client.fetchMovieWatchlist()
+
+        assertTrue(seenRequests.isNotEmpty(), "the mock engine recorded no requests")
+        val writeMethods = setOf("POST", "PUT", "PATCH", "DELETE")
+        for ((method, path) in seenRequests) {
+            if (path == "/api/v1/site-access/unlock") {
+                assertEquals("POST", method, "only the login/unlock call may be non-GET")
+            } else {
+                assertTrue(
+                    method !in writeMethods,
+                    "$method $path is a write against Wencke; Movie Selector must be read-only after login",
+                )
+                assertEquals("GET", method, "every Wencke call besides login/unlock must be GET, got $method $path")
+            }
+        }
+    }
+
+    @Test fun `WenckeClient's source never references a write HTTP method`() {
+        val source = java.io.File("src/main/kotlin/de/luisbenedikt/movieselector/backend/WenckeClient.kt").readText()
+        for (writeCall in listOf("httpClient.put(", "httpClient.patch(", "httpClient.delete(")) {
+            assertTrue(writeCall !in source, "WenckeClient.kt must never call $writeCall against Wencke")
+        }
+        // Exactly one POST is allowed: the site-access/unlock login. Any second POST would be a
+        // write path against Wencke and must not exist.
+        val postCount = Regex("""httpClient\.post\(""").findAll(source).count()
+        assertEquals(1, postCount, "WenckeClient.kt must issue exactly one POST (the unlock login)")
+    }
 }
