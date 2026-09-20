@@ -140,13 +140,13 @@ private fun filtersHtml(): String = """
       <h3>Providers</h3>
       <div class="filter-row" id="provider-row">
         ${listOf("NETFLIX", "DISNEY_PLUS", "PRIME_VIDEO").joinToString("") { code ->
-            """<label class="chip"><input type="checkbox" value="$code" ${if (code in State.providers) "checked" else ""}/> ${providerLabel(code)}</label>"""
+            """<label class="chip"><input type="checkbox" value="$code" ${if (code in State.providers) "checked" else ""}> ${providerLabel(code)}</label>"""
         }}
       </div>
       <h3>Runtime</h3>
       <div class="filter-row" id="runtime-row">
         ${listOf("ANY" to "Any", "UP_TO_90" to "≤ 90 min", "UP_TO_120" to "≤ 120 min", "UP_TO_150" to "≤ 150 min").joinToString("") { (value, label) ->
-            """<label class="chip"><input type="radio" name="runtime" value="$value" ${if (State.runtime == value) "checked" else ""}/> $label</label>"""
+            """<label class="chip"><input type="radio" name="runtime" value="$value" ${if (State.runtime == value) "checked" else ""}> $label</label>"""
         }}
       </div>
       <button id="start-button" class="primary">Start</button>

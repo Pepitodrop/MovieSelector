@@ -53,13 +53,13 @@ fun startSession(providers: List<String>, runtime: String, onSuccess: (SessionSt
     val body = js("({})")
     body.providers = providers.toTypedArray()
     body.runtime = runtime
-    apiRequest("/session", "POST", body, { onSuccess(it.unsafeCast<SessionStateJson>()) }, onError)
+    apiRequest("session", "POST", body, { onSuccess(it.unsafeCast<SessionStateJson>()) }, onError)
 }
 
 fun sessionAction(sessionId: String, action: String, onSuccess: (SessionStateJson) -> Unit, onError: (String) -> Unit) {
-    apiRequest("/session/$sessionId/$action", "POST", null, { onSuccess(it.unsafeCast<SessionStateJson>()) }, onError)
+    apiRequest(joinPath("session", sessionId, action), "POST", null, { onSuccess(it.unsafeCast<SessionStateJson>()) }, onError)
 }
 
 fun acceptSession(sessionId: String, onSuccess: (AcceptedJson) -> Unit, onError: (String) -> Unit) {
-    apiRequest("/session/$sessionId/accept", "POST", null, { onSuccess(it.unsafeCast<AcceptedJson>()) }, onError)
+    apiRequest(joinPath("session", sessionId, "accept"), "POST", null, { onSuccess(it.unsafeCast<AcceptedJson>()) }, onError)
 }
