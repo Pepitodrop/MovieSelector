@@ -6,6 +6,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import io.ktor.http.headers
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -24,9 +25,9 @@ class WenckeClientTest {
         val engine = MockEngine { request ->
             when {
                 request.url.encodedPath == "/api/v1/site-access/unlock" ->
-                    respond("{\"authenticated\":true}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc123; Path=/; HttpOnly"))
+                    respond("{\"authenticated\":true}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke-site-access=abc123; Path=/; HttpOnly"))
                 request.url.encodedPath == "/api/v1/movie-watchlist" -> {
-                    sawCookieOnFetch = request.headers[HttpHeaders.Cookie] == "wencke_session=abc123"
+                    sawCookieOnFetch = request.headers[HttpHeaders.Cookie] == "wencke-site-access=abc123"
                     respond(EMPTY_PAGE, HttpStatusCode.OK)
                 }
                 else -> respond("not found", HttpStatusCode.NotFound)
@@ -56,7 +57,7 @@ class WenckeClientTest {
             when (request.url.encodedPath) {
                 "/api/v1/site-access/unlock" -> {
                     unlockCalls++
-                    respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=session$unlockCalls; Path=/"))
+                    respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke-site-access=session$unlockCalls; Path=/"))
                 }
                 "/api/v1/movie-watchlist" -> {
                     fetchCalls++
@@ -88,7 +89,7 @@ class WenckeClientTest {
     @Test fun `malformed (non-JSON) watchlist response is rejected, not silently emptied`() = runBlocking<Unit> {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
-                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke-site-access=abc; Path=/"))
                 "/api/v1/movie-watchlist" -> respond("<html>not json</html>", HttpStatusCode.OK)
                 else -> respond("not found", HttpStatusCode.NotFound)
             }
@@ -101,7 +102,7 @@ class WenckeClientTest {
         var query = ""
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
-                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke-site-access=abc; Path=/"))
                 "/api/v1/movie-watchlist" -> {
                     query = request.url.encodedQuery
                     respond(pageJson(0, 2, 2, 1), HttpStatusCode.OK)
@@ -117,7 +118,7 @@ class WenckeClientTest {
     @Test fun `empty items yields an empty list`() = runBlocking<Unit> {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
-                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke-site-access=abc; Path=/"))
                 else -> respond(EMPTY_PAGE, HttpStatusCode.OK)
             }
         }
@@ -128,7 +129,7 @@ class WenckeClientTest {
         val pages = mutableListOf<String>()
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
-                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke-site-access=abc; Path=/"))
                 else -> {
                     val page = request.url.parameters["page"]!!.toInt()
                     pages += page.toString()
@@ -144,7 +145,7 @@ class WenckeClientTest {
         var calls = 0
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
-                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke-site-access=abc; Path=/"))
                 else -> { calls++; respond(pageJson(0, 1, 1_000_000, calls), HttpStatusCode.OK) }
             }
         }
@@ -155,7 +156,7 @@ class WenckeClientTest {
     @Test fun `a bare JSON array (old assumed contract) is rejected`() = runBlocking<Unit> {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
-                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke-site-access=abc; Path=/"))
                 else -> respond("[]", HttpStatusCode.OK)
             }
         }
@@ -165,13 +166,72 @@ class WenckeClientTest {
     @Test fun `a watchlist response that is is a JSON object without items is rejected`() = runBlocking<Unit> {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
-                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke-site-access=abc; Path=/"))
                 "/api/v1/movie-watchlist" -> respond("{\"not\":\"a page\"}", HttpStatusCode.OK)
                 else -> respond("not found", HttpStatusCode.NotFound)
             }
         }
         val client = WenckeClient(HttpClient(engine), BASE_URL, "correct-password")
         assertFailsWith<WenckeUnavailableException> { client.fetchMovieWatchlist() }
+    }
+
+    // --- Multiple Set-Cookie headers on unlock ------------------------------------------------
+
+    private fun cookieEngine(unlockCookies: List<String>, sent: MutableList<String?>) = MockEngine { request ->
+        when (request.url.encodedPath) {
+            "/api/v1/site-access/unlock" ->
+                respond("{}", HttpStatusCode.OK, headers { unlockCookies.forEach { append(HttpHeaders.SetCookie, it) } })
+            else -> { sent += request.headers[HttpHeaders.Cookie]; respond(EMPTY_PAGE, HttpStatusCode.OK) }
+        }
+    }
+
+    @Test fun `contributor cookie first, site-access second - only site-access is sent`() = runBlocking<Unit> {
+        val sent = mutableListOf<String?>()
+        val engine = cookieEngine(listOf("wencke.contributor=c1; Path=/; HttpOnly", "wencke-site-access=s1; Path=/; HttpOnly"), sent)
+        WenckeClient(HttpClient(engine), BASE_URL, "pw").fetchMovieWatchlist()
+        assertEquals(listOf<String?>("wencke-site-access=s1"), sent)
+    }
+
+    @Test fun `reversed cookie order still sends site-access`() = runBlocking<Unit> {
+        val sent = mutableListOf<String?>()
+        val engine = cookieEngine(listOf("wencke-site-access=s1; Path=/", "wencke.contributor=c1; Path=/"), sent)
+        WenckeClient(HttpClient(engine), BASE_URL, "pw").fetchMovieWatchlist()
+        assertEquals(listOf<String?>("wencke-site-access=s1"), sent)
+    }
+
+    @Test fun `only the site-access cookie works`() = runBlocking<Unit> {
+        val sent = mutableListOf<String?>()
+        WenckeClient(HttpClient(cookieEngine(listOf("wencke-site-access=s1; Path=/"), sent)), BASE_URL, "pw").fetchMovieWatchlist()
+        assertEquals(listOf<String?>("wencke-site-access=s1"), sent)
+    }
+
+    @Test fun `missing site-access cookie is rejected and no watchlist request is made`() = runBlocking<Unit> {
+        val sent = mutableListOf<String?>()
+        val engine = cookieEngine(listOf("wencke.contributor=c1; Path=/"), sent)
+        assertFailsWith<WenckeUnavailableException> { WenckeClient(HttpClient(engine), BASE_URL, "pw").fetchMovieWatchlist() }
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test fun `401 retry re-authenticates and sends the fresh site-access cookie`() = runBlocking<Unit> {
+        var unlocks = 0
+        val sent = mutableListOf<String?>()
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/v1/site-access/unlock" -> {
+                    unlocks++
+                    respond("{}", HttpStatusCode.OK, headers {
+                        append(HttpHeaders.SetCookie, "wencke.contributor=c$unlocks; Path=/")
+                        append(HttpHeaders.SetCookie, "wencke-site-access=s$unlocks; Path=/")
+                    })
+                }
+                else -> {
+                    sent += request.headers[HttpHeaders.Cookie]
+                    if (sent.size == 1) respond("{}", HttpStatusCode.Unauthorized) else respond(EMPTY_PAGE, HttpStatusCode.OK)
+                }
+            }
+        }
+        WenckeClient(HttpClient(engine), BASE_URL, "pw").fetchMovieWatchlist()
+        assertEquals(listOf<String?>("wencke-site-access=s1", "wencke-site-access=s2"), sent)
     }
 
     // --- Read-only contract -------------------------------------------------------------------
@@ -183,7 +243,7 @@ class WenckeClientTest {
         val engine = MockEngine { request ->
             seenRequests += request.method.value to request.url.encodedPath
             when (request.url.encodedPath) {
-                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke-site-access=abc; Path=/"))
                 "/api/v1/movie-watchlist" -> respond(EMPTY_PAGE, HttpStatusCode.OK)
                 else -> respond("not found", HttpStatusCode.NotFound)
             }
