@@ -7,13 +7,16 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonArray
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 private const val BASE_URL = "https://wencke.test"
+private const val EMPTY_PAGE = """{"items":[],"page":1,"pageSize":100,"total":0}"""
+
+private fun pageJson(from: Int, count: Int, total: Int, page: Int) =
+    """{"items":[${(from until from + count).joinToString(",") { """{"id":"$it"}""" }}],"page":$page,"pageSize":100,"total":$total}"""
 
 class WenckeClientTest {
     @Test fun `authenticated success fetches the watchlist using the unlock session cookie`() = runBlocking {
@@ -24,14 +27,14 @@ class WenckeClientTest {
                     respond("{\"authenticated\":true}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc123; Path=/; HttpOnly"))
                 request.url.encodedPath == "/api/v1/movie-watchlist" -> {
                     sawCookieOnFetch = request.headers[HttpHeaders.Cookie] == "wencke_session=abc123"
-                    respond("[]", HttpStatusCode.OK)
+                    respond(EMPTY_PAGE, HttpStatusCode.OK)
                 }
                 else -> respond("not found", HttpStatusCode.NotFound)
             }
         }
         val client = WenckeClient(HttpClient(engine), BASE_URL, "correct-password")
         val result = client.fetchMovieWatchlist()
-        assertEquals(JsonArray(emptyList()), result)
+        assertEquals(0, result.size)
         assertTrue(sawCookieOnFetch, "the movie-watchlist request must carry the session cookie from unlock")
     }
 
@@ -58,14 +61,14 @@ class WenckeClientTest {
                 "/api/v1/movie-watchlist" -> {
                     fetchCalls++
                     // First attempt looks expired (401); the retry (with the fresh cookie) succeeds.
-                    if (fetchCalls == 1) respond("{}", HttpStatusCode.Unauthorized) else respond("[]", HttpStatusCode.OK)
+                    if (fetchCalls == 1) respond("{}", HttpStatusCode.Unauthorized) else respond(EMPTY_PAGE, HttpStatusCode.OK)
                 }
                 else -> respond("not found", HttpStatusCode.NotFound)
             }
         }
         val client = WenckeClient(HttpClient(engine), BASE_URL, "correct-password")
         val result = client.fetchMovieWatchlist()
-        assertEquals(JsonArray(emptyList()), result)
+        assertEquals(0, result.size)
         assertEquals(2, unlockCalls, "expiry must trigger exactly one re-login")
         assertEquals(2, fetchCalls)
     }
@@ -94,11 +97,76 @@ class WenckeClientTest {
         assertFailsWith<WenckeUnavailableException> { client.fetchMovieWatchlist() }
     }
 
-    @Test fun `a watchlist response that is valid JSON but not an array is rejected`() = runBlocking {
+    @Test fun `paginated response items are extracted and page 1 requests pageSize 100`() = runBlocking {
+        var query = ""
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
                 "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
-                "/api/v1/movie-watchlist" -> respond("{\"not\":\"an array\"}", HttpStatusCode.OK)
+                "/api/v1/movie-watchlist" -> {
+                    query = request.url.encodedQuery
+                    respond(pageJson(0, 2, 2, 1), HttpStatusCode.OK)
+                }
+                else -> respond("not found", HttpStatusCode.NotFound)
+            }
+        }
+        val result = WenckeClient(HttpClient(engine), BASE_URL, "pw").fetchMovieWatchlist()
+        assertEquals(2, result.size)
+        assertEquals("page=1&pageSize=100", query)
+    }
+
+    @Test fun `empty items yields an empty list`() = runBlocking {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                else -> respond(EMPTY_PAGE, HttpStatusCode.OK)
+            }
+        }
+        assertEquals(0, WenckeClient(HttpClient(engine), BASE_URL, "pw").fetchMovieWatchlist().size)
+    }
+
+    @Test fun `multiple pages are followed until total is collected`() = runBlocking {
+        val pages = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                else -> {
+                    val page = request.url.parameters["page"]!!.toInt()
+                    pages += page.toString()
+                    respond(if (page == 1) pageJson(0, 100, 130, 1) else pageJson(100, 30, 130, 2), HttpStatusCode.OK)
+                }
+            }
+        }
+        assertEquals(130, WenckeClient(HttpClient(engine), BASE_URL, "pw").fetchMovieWatchlist().size)
+        assertEquals(listOf("1", "2"), pages)
+    }
+
+    @Test fun `a server that never reaches total is bounded, not looped forever`() = runBlocking {
+        var calls = 0
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                else -> { calls++; respond(pageJson(0, 1, 1_000_000, calls), HttpStatusCode.OK) }
+            }
+        }
+        assertFailsWith<WenckeUnavailableException> { WenckeClient(HttpClient(engine), BASE_URL, "pw").fetchMovieWatchlist() }
+        assertEquals(10, calls)
+    }
+
+    @Test fun `a bare JSON array (old assumed contract) is rejected`() = runBlocking {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                else -> respond("[]", HttpStatusCode.OK)
+            }
+        }
+        assertFailsWith<WenckeUnavailableException> { WenckeClient(HttpClient(engine), BASE_URL, "pw").fetchMovieWatchlist() }
+    }
+
+    @Test fun `a watchlist response that is is a JSON object without items is rejected`() = runBlocking {
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
+                "/api/v1/movie-watchlist" -> respond("{\"not\":\"a page\"}", HttpStatusCode.OK)
                 else -> respond("not found", HttpStatusCode.NotFound)
             }
         }
@@ -116,7 +184,7 @@ class WenckeClientTest {
             seenRequests += request.method.value to request.url.encodedPath
             when (request.url.encodedPath) {
                 "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
-                "/api/v1/movie-watchlist" -> respond("[]", HttpStatusCode.OK)
+                "/api/v1/movie-watchlist" -> respond(EMPTY_PAGE, HttpStatusCode.OK)
                 else -> respond("not found", HttpStatusCode.NotFound)
             }
         }
