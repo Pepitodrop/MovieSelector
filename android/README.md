@@ -14,10 +14,28 @@ Requires an Android SDK (`local.properties` with `sdk.dir=...`, or `ANDROID_HOME
 
 Artifacts land at:
 - `android/build/outputs/apk/debug/android-debug.apk`
-- `android/build/outputs/apk/release/android-release-unsigned.apk` (unsigned -- no
-  production keystore exists in this repo; add a real signing config before any
-  Play Store distribution)
+- `android/build/outputs/apk/release/android-release.apk` (signed) or
+  `android-release-unsigned.apk` when no signing config is available
 - `android/build/outputs/bundle/release/android-release.aab`
+
+## Release signing
+
+The release key is generated and kept locally, never committed. The build reads it from
+environment variables (`MOVIE_SELECTOR_KEYSTORE`, `MOVIE_SELECTOR_KEYSTORE_PASSWORD`,
+`MOVIE_SELECTOR_KEY_ALIAS`, `MOVIE_SELECTOR_KEY_PASSWORD`) or from
+`~/.config/movie-selector/signing/signing.properties` (override the path with
+`MOVIE_SELECTOR_SIGNING_PROPERTIES`), a file with `storeFile`, `storePassword`, `keyAlias`,
+`keyPassword`. If neither exists the release build is simply unsigned.
+
+Back up the `.jks` and the properties file: losing the key means you can never ship an update
+that installs over an existing release build.
+
+Create a key (PKCS12 uses one password for store and key):
+
+```
+keytool -genkeypair -keystore movie-selector-release.jks -alias movie-selector-release \
+  -keyalg RSA -keysize 4096 -validity 10950 -dname "CN=Movie Selector, O=..., C=..."
+```
 
 ## Pointing at a backend
 

@@ -12,3 +12,11 @@ kotlin-js-store/
 *.log
 /android/.cxx/
 /android/captures/
+
+# Release signing material (kept outside the repo; ignored here as a safety net)
+*.jks
+*.keystore
+*.p12
+*.pfx
+signing.properties
+keystore.properties
