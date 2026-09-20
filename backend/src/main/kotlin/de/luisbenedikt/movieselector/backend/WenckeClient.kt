@@ -15,9 +15,15 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
+
+private const val PAGE_SIZE = 100
+private const val MAX_PAGES = 10
 
 class WenckeAuthException(message: String) : Exception(message)
 class WenckeUnavailableException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -39,23 +45,39 @@ class WenckeClient(
     @Volatile private var sessionCookie: String? = null
     private val authMutex = Mutex()
 
+    /**
+     * Wencke returns the standard paginated content-list object `{items, page, pageSize, total}`
+     * (pageSize is clamped to 100 server-side, which is also the watchlist cap). Pages are read
+     * until `total` items are collected; [MAX_PAGES] bounds the loop against a misbehaving server.
+     */
     suspend fun fetchMovieWatchlist(): JsonArray {
-        val body = requestMovieWatchlist()
-        return try {
-            Json.parseToJsonElement(body) as? JsonArray
-                ?: throw WenckeUnavailableException("Wencke movie-watchlist response was not a JSON array")
-        } catch (e: Exception) {
-            if (e is WenckeUnavailableException) throw e
-            throw WenckeUnavailableException("Wencke movie-watchlist response was not valid JSON", e)
+        val all = mutableListOf<JsonElement>()
+        for (page in 1..MAX_PAGES) {
+            val root = parseObject(requestMovieWatchlist(page))
+            val items = root["items"] as? JsonArray
+                ?: throw WenckeUnavailableException("Wencke movie-watchlist response had no \"items\" array")
+            all.addAll(items)
+            val total = (root["total"] as? JsonPrimitive)?.intOrNull
+            if (items.isEmpty() || total == null || all.size >= total) return JsonArray(all)
         }
+        throw WenckeUnavailableException("Wencke movie-watchlist exceeded $MAX_PAGES pages")
     }
 
-    private suspend fun requestMovieWatchlist(): String {
+    private fun parseObject(body: String): JsonObject {
+        val element = try {
+            Json.parseToJsonElement(body)
+        } catch (e: Exception) {
+            throw WenckeUnavailableException("Wencke movie-watchlist response was not valid JSON", e)
+        }
+        return element as? JsonObject
+            ?: throw WenckeUnavailableException("Wencke movie-watchlist response was not a JSON object")
+    }
+
+    private suspend fun requestMovieWatchlist(page: Int): String {
+        val url = "$baseUrl/api/v1/movie-watchlist?page=$page&pageSize=$PAGE_SIZE"
         ensureAuthenticated()
         val response = try {
-            httpClient.get("$baseUrl/api/v1/movie-watchlist") {
-                header(HttpHeaders.Cookie, sessionCookie)
-            }
+            httpClient.get(url) { header(HttpHeaders.Cookie, sessionCookie) }
         } catch (e: Exception) {
             throw WenckeUnavailableException("could not reach Wencke", e)
         }
@@ -63,7 +85,7 @@ class WenckeClient(
             authMutex.withLock { sessionCookie = null }
             ensureAuthenticated()
             val retry = try {
-                httpClient.get("$baseUrl/api/v1/movie-watchlist") { header(HttpHeaders.Cookie, sessionCookie) }
+                httpClient.get(url) { header(HttpHeaders.Cookie, sessionCookie) }
             } catch (e: Exception) {
                 throw WenckeUnavailableException("could not reach Wencke on retry", e)
             }
@@ -86,7 +108,7 @@ class WenckeClient(
                 httpClient.post("$baseUrl/api/v1/site-access/unlock") {
                     contentType(ContentType.Application.Json)
                     setBody(Json.encodeToString(
-                        kotlinx.serialization.json.JsonObject.serializer(),
+                        JsonObject.serializer(),
                         buildJsonObject { put("password", JsonPrimitive(sitePassword)) },
                     ))
                 }
