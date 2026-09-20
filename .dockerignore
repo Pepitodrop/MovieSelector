@@ -1,0 +1,11 @@
+.git
+.gradle
+build
+*/build
+.idea
+*.iml
+node_modules
+kotlin-js-store
+local.properties
+android
+*.log
