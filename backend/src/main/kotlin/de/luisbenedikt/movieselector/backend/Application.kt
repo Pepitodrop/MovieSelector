@@ -11,8 +11,11 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.callloging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.http.content.staticFiles
 import io.ktor.server.plugins.cors.routing.CORS
+import io.ktor.server.routing.routing
 import kotlinx.serialization.json.Json
+import java.io.File
 
 /**
  * Required environment variables (see the top-level deployment doc for exact production values):
@@ -37,13 +40,19 @@ fun main() {
     val wenckeClient = WenckeClient(httpClient, wenckeBaseUrl, wenckeSitePassword)
     val pool = MoviePoolCache(wenckeClient, MovieMapper())
     val store = SessionStore()
+    val siteDirectory = System.getenv("SITE_DIRECTORY")
 
     embeddedServer(Netty, port = port, host = "0.0.0.0") {
-        configure(publicOrigin, pool, store)
+        configure(publicOrigin, pool, store, siteDirectory)
     }.start(wait = true)
 }
 
-fun Application.configure(publicOrigin: String, pool: MoviePool, store: SessionStore) {
+/**
+ * [siteDirectory], if set, serves the web client's static build (index.html + JS bundle) at "/"
+ * from the same container/process as the API -- one deployable unit per game, matching the
+ * other GamePage games. Leave it null for tests, which only care about the /api routes.
+ */
+fun Application.configure(publicOrigin: String, pool: MoviePool, store: SessionStore, siteDirectory: String? = null) {
     install(CallLogging)
     install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; encodeDefaults = true }) }
     install(CORS) {
@@ -55,6 +64,13 @@ fun Application.configure(publicOrigin: String, pool: MoviePool, store: SessionS
         // cookie, so this API carries no ambient authority and needs no CSRF protection either.
     }
     Routes(pool, store).install(this)
+    if (siteDirectory != null) {
+        routing {
+            staticFiles("/", File(siteDirectory)) {
+                default("index.html")
+            }
+        }
+    }
 }
 
 private fun requireEnv(name: String): String =
