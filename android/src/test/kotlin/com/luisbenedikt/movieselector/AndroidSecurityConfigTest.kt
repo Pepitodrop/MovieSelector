@@ -33,4 +33,12 @@ class AndroidSecurityConfigTest {
     @Test fun `no build variant overrides the network config (no cleartext, no domain-config)`() {
         assertFalse(File("src/debug").exists(), "a debug override would ship cleartext/domain rules in the installable APK")
     }
+
+    @Test fun `no signing material or secrets file exists inside the repository`() {
+        val bad = File("..").walkTopDown()
+            .onEnter { it.name !in setOf("build", ".gradle", ".git", ".kotlin", "node_modules") }
+            .filter { it.isFile && (it.extension in setOf("jks", "keystore", "p12", "pfx") || it.name in setOf("signing.properties", "keystore.properties")) }
+            .map { it.path }.toList()
+        assertTrue(bad.isEmpty(), "signing material must live outside the repo: $bad")
+    }
 }

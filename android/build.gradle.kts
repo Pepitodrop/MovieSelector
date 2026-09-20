@@ -1,9 +1,26 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     kotlin("android")
     kotlin("plugin.compose")
     kotlin("plugin.serialization")
 }
+
+// Release signing secrets never live in the repo. They come from environment variables
+// (MOVIE_SELECTOR_KEYSTORE / _KEYSTORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD) or from a local
+// properties file outside the checkout (default ~/.config/movie-selector/signing/signing.properties,
+// override with MOVIE_SELECTOR_SIGNING_PROPERTIES). Without either, the release build is unsigned.
+val signingProps = Properties().apply {
+    val path = System.getenv("MOVIE_SELECTOR_SIGNING_PROPERTIES")
+        ?: "${System.getProperty("user.home")}/.config/movie-selector/signing/signing.properties"
+    file(path).takeIf { it.isFile }?.inputStream()?.use { load(it) }
+}
+fun signingValue(env: String, prop: String): String? = System.getenv(env) ?: signingProps.getProperty(prop)
+val releaseStoreFile = signingValue("MOVIE_SELECTOR_KEYSTORE", "storeFile")
+val releaseSigningConfigured = releaseStoreFile != null && file(releaseStoreFile).isFile &&
+    signingValue("MOVIE_SELECTOR_KEYSTORE_PASSWORD", "storePassword") != null &&
+    signingValue("MOVIE_SELECTOR_KEY_ALIAS", "keyAlias") != null
 
 android {
     namespace = "com.luisbenedikt.movieselector"
@@ -22,9 +39,22 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"${project.findProperty("apiBaseUrl") ?: "https://game.luisbenedikt.de/play/movie-selector/api"}\"")
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = signingValue("MOVIE_SELECTOR_KEYSTORE_PASSWORD", "storePassword")
+                keyAlias = signingValue("MOVIE_SELECTOR_KEY_ALIAS", "keyAlias")
+                keyPassword = signingValue("MOVIE_SELECTOR_KEY_PASSWORD", "keyPassword")
+                    ?: signingValue("MOVIE_SELECTOR_KEYSTORE_PASSWORD", "storePassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
         }
     }
 
