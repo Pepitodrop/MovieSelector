@@ -24,6 +24,7 @@ import kotlinx.serialization.json.put
 
 private const val PAGE_SIZE = 100
 private const val MAX_PAGES = 10
+private const val SITE_ACCESS_COOKIE = "wencke-site-access"
 
 class WenckeAuthException(message: String) : Exception(message)
 class WenckeUnavailableException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -121,9 +122,12 @@ class WenckeClient(
             if (!response.status.isSuccess()) {
                 throw WenckeUnavailableException("Wencke site-access unlock failed: ${response.status}")
             }
-            val setCookie = response.headers[HttpHeaders.SetCookie]
-                ?: throw WenckeUnavailableException("Wencke unlock succeeded but returned no session cookie")
-            sessionCookie = setCookie.substringBefore(';')
+            // Unlock sets several cookies (e.g. wencke.contributor first); only the site-access
+            // cookie authenticates. Send that one alone and never expose it to the browser.
+            sessionCookie = response.headers.getAll(HttpHeaders.SetCookie).orEmpty()
+                .map { it.substringBefore(';').trim() }
+                .firstOrNull { it.startsWith("$SITE_ACCESS_COOKIE=") }
+                ?: throw WenckeUnavailableException("Wencke unlock succeeded but returned no $SITE_ACCESS_COOKIE cookie")
         }
     }
 }
