@@ -1,0 +1,14 @@
+.gradle/
+build/
+out/
+*.class
+local.properties
+.idea/
+*.iml
+.kotlin/
+node_modules/
+kotlin-js-store/
+.env
+*.log
+/android/.cxx/
+/android/captures/
