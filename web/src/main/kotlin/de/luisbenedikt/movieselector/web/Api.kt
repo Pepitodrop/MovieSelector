@@ -3,8 +3,9 @@ package de.luisbenedikt.movieselector.web
 import kotlinx.browser.window
 import org.w3c.fetch.Response
 
-/** The backend is same-origin under the GamePage launcher (`/play/movie-selector/api/...`). */
-val API_BASE: String = js("(window.MOVIE_SELECTOR_API_BASE || '/api')") as String
+/** The backend is same-origin under the GamePage launcher (`/play/movie-selector/api/...`); see [buildApiUrl]. */
+private fun apiUrl(path: String): String =
+    buildApiUrl(window.location.pathname, js("window.MOVIE_SELECTOR_API_BASE") as? String, path)
 
 external interface MovieJson {
     val id: String
@@ -38,12 +39,13 @@ fun apiRequest(path: String, method: String, body: dynamic, onSuccess: (dynamic)
     init.method = method
     init.headers = jsonHeaders()
     if (body != null) init.body = JSON.stringify(body)
-    window.fetch("$API_BASE$path", init).then { response: Response ->
-        response.json().then { json ->
-            if (response.ok) onSuccess(json)
-            else onError((json.asDynamic().error as? String) ?: "Request failed (HTTP ${response.status})")
+    window.fetch(apiUrl(path), init).then { response: Response ->
+        response.text().then { text ->
+            val json = try { JSON.parse<dynamic>(text) } catch (e: Throwable) { null }
+            if (response.ok && json != null) onSuccess(json)
+            else onError(errorMessage(json?.error as? String, response.status.toInt()))
             null
-        }.catch { onError("The server sent back something unexpected.") }
+        }.catch { onError("Could not read the server response (HTTP ${response.status}).") }
     }.catch { onError("Could not reach the server. Check your connection and try again.") }
 }
 
