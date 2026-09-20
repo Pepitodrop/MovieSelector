@@ -19,7 +19,7 @@ private fun pageJson(from: Int, count: Int, total: Int, page: Int) =
     """{"items":[${(from until from + count).joinToString(",") { """{"id":"$it"}""" }}],"page":$page,"pageSize":100,"total":$total}"""
 
 class WenckeClientTest {
-    @Test fun `authenticated success fetches the watchlist using the unlock session cookie`() = runBlocking {
+    @Test fun `authenticated success fetches the watchlist using the unlock session cookie`() = runBlocking<Unit> {
         var sawCookieOnFetch = false
         val engine = MockEngine { request ->
             when {
@@ -38,7 +38,7 @@ class WenckeClientTest {
         assertTrue(sawCookieOnFetch, "the movie-watchlist request must carry the session cookie from unlock")
     }
 
-    @Test fun `unauthenticated site password is reported as an auth failure`() = runBlocking {
+    @Test fun `unauthenticated site password is reported as an auth failure`() = runBlocking<Unit> {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
                 "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.Unauthorized)
@@ -49,7 +49,7 @@ class WenckeClientTest {
         assertFailsWith<WenckeAuthException> { client.fetchMovieWatchlist() }
     }
 
-    @Test fun `an expired session is transparently re-authenticated and retried once`() = runBlocking {
+    @Test fun `an expired session is transparently re-authenticated and retried once`() = runBlocking<Unit> {
         var unlockCalls = 0
         var fetchCalls = 0
         val engine = MockEngine { request ->
@@ -73,19 +73,19 @@ class WenckeClientTest {
         assertEquals(2, fetchCalls)
     }
 
-    @Test fun `wencke unavailable surfaces as WenckeUnavailableException, not a crash`() = runBlocking {
+    @Test fun `wencke unavailable surfaces as WenckeUnavailableException, not a crash`() = runBlocking<Unit> {
         val engine = MockEngine { throw java.io.IOException("connection refused") }
         val client = WenckeClient(HttpClient(engine), BASE_URL, "correct-password")
         assertFailsWith<WenckeUnavailableException> { client.fetchMovieWatchlist() }
     }
 
-    @Test fun `wencke timeout surfaces as WenckeUnavailableException`() = runBlocking {
+    @Test fun `wencke timeout surfaces as WenckeUnavailableException`() = runBlocking<Unit> {
         val engine = MockEngine { throw java.util.concurrent.TimeoutException("timed out") }
         val client = WenckeClient(HttpClient(engine), BASE_URL, "correct-password")
         assertFailsWith<WenckeUnavailableException> { client.fetchMovieWatchlist() }
     }
 
-    @Test fun `malformed (non-JSON) watchlist response is rejected, not silently emptied`() = runBlocking {
+    @Test fun `malformed (non-JSON) watchlist response is rejected, not silently emptied`() = runBlocking<Unit> {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
                 "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
@@ -97,7 +97,7 @@ class WenckeClientTest {
         assertFailsWith<WenckeUnavailableException> { client.fetchMovieWatchlist() }
     }
 
-    @Test fun `paginated response items are extracted and page 1 requests pageSize 100`() = runBlocking {
+    @Test fun `paginated response items are extracted and page 1 requests pageSize 100`() = runBlocking<Unit> {
         var query = ""
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
@@ -114,7 +114,7 @@ class WenckeClientTest {
         assertEquals("page=1&pageSize=100", query)
     }
 
-    @Test fun `empty items yields an empty list`() = runBlocking {
+    @Test fun `empty items yields an empty list`() = runBlocking<Unit> {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
                 "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
@@ -124,7 +124,7 @@ class WenckeClientTest {
         assertEquals(0, WenckeClient(HttpClient(engine), BASE_URL, "pw").fetchMovieWatchlist().size)
     }
 
-    @Test fun `multiple pages are followed until total is collected`() = runBlocking {
+    @Test fun `multiple pages are followed until total is collected`() = runBlocking<Unit> {
         val pages = mutableListOf<String>()
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
@@ -140,7 +140,7 @@ class WenckeClientTest {
         assertEquals(listOf("1", "2"), pages)
     }
 
-    @Test fun `a server that never reaches total is bounded, not looped forever`() = runBlocking {
+    @Test fun `a server that never reaches total is bounded, not looped forever`() = runBlocking<Unit> {
         var calls = 0
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
@@ -152,7 +152,7 @@ class WenckeClientTest {
         assertEquals(10, calls)
     }
 
-    @Test fun `a bare JSON array (old assumed contract) is rejected`() = runBlocking {
+    @Test fun `a bare JSON array (old assumed contract) is rejected`() = runBlocking<Unit> {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
                 "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
@@ -162,7 +162,7 @@ class WenckeClientTest {
         assertFailsWith<WenckeUnavailableException> { WenckeClient(HttpClient(engine), BASE_URL, "pw").fetchMovieWatchlist() }
     }
 
-    @Test fun `a watchlist response that is is a JSON object without items is rejected`() = runBlocking {
+    @Test fun `a watchlist response that is is a JSON object without items is rejected`() = runBlocking<Unit> {
         val engine = MockEngine { request ->
             when (request.url.encodedPath) {
                 "/api/v1/site-access/unlock" -> respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.SetCookie, "wencke_session=abc; Path=/"))
@@ -178,7 +178,7 @@ class WenckeClientTest {
     // Wencke is the source of truth; Movie Selector must never mutate it. These tests fail loudly
     // if a future change adds a write path against Wencke's watchlist.
 
-    @Test fun `a full fetch, including the re-auth retry path, never sends a write method to Wencke`() = runBlocking {
+    @Test fun `a full fetch, including the re-auth retry path, never sends a write method to Wencke`() = runBlocking<Unit> {
         val seenRequests = mutableListOf<Pair<String, String>>() // method to path
         val engine = MockEngine { request ->
             seenRequests += request.method.value to request.url.encodedPath
