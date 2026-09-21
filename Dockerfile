@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1.7
+# Built and deployed by Woodpecker from an exact CI-passed commit.
 FROM eclipse-temurin:21-jdk AS builder
 WORKDIR /src
 COPY gradlew gradlew.bat ./
