@@ -1,0 +1,30 @@
+when:
+  - event: push
+    branch: main
+    path:
+      include:
+        - "backend/**"
+        - "game-engine/**"
+        - "piet-core/**"
+        - "web/**"
+        - "gradle/**"
+        - "gradlew"
+        - "gradle.properties"
+        - "settings.gradle.kts"
+        - "build.gradle.kts"
+        - "Dockerfile"
+
+labels:
+  deploy: movie-selector
+
+depends_on:
+  - ci
+
+concurrency:
+  limit: 1
+
+steps:
+  - name: deploy-production
+    image: bash
+    commands:
+      - sudo -n /usr/local/sbin/woodpecker-deploy-movie-selector
